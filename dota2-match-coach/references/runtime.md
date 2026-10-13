@@ -27,7 +27,7 @@ The shell wrapper remains positional on macOS/Linux:
 ./scripts/analyze-match.sh 8970339828 123456 --parse-timeout-ms 120000 --output-dir ./output
 ```
 
-When OpenDota has not parsed the replay yet, the runtime requests a parse and polls it every five seconds until the parse timeout. OpenDota's free tier allows 60 requests a minute, so leave about a minute between runs when analysing several matches; a rate-limited run still writes an artifact, with the OpenDota facts it could not fetch marked unavailable.
+When OpenDota has not parsed the replay yet, the runtime requests a parse, polls the job every five seconds and reloads the match as soon as the job finishes, waiting no longer than the parse timeout. OpenDota's free tier allows 60 requests a minute and counts a parse request as ten, so leave about a minute between runs when analysing several matches; a rate-limited run still writes an artifact, with the OpenDota facts it could not fetch marked unavailable.
 
 An account ID or exact English hero name is required. If both are passed, they must resolve to the same participant. Hero-only selection is for a player whose account is not known; it does not establish that the match belongs to the requester.
 
@@ -69,7 +69,7 @@ Without `STRATZ_API_KEY`, an account-based current-patch smoke is still useful a
 
 ## Read the v2 artifact
 
-The successful JSON has `schemaVersion: "2.3.0"`. Inspect these sections before writing a review:
+A successful run prints the paths it wrote: `<match_id>-<account_id>.json` and `.md` in the output directory, so each player reviewed in a match keeps their own pair. The successful JSON has `schemaVersion: "2.3.0"`. Inspect these sections before writing a review:
 
 - `sources`, `warnings`, and `dataQuality.capabilities`: what source evidence exists and which classes of conclusion are supported;
 - `participants`: ten deterministic match slots with `{ id, name }` hero references, side, position, lane, role, rank, and playback availability; unknown values remain `null`;

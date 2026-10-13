@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeParticipants, resolveLaneMatchup } from '../lib/lane.mjs';
+import { indexForOpenSlot, normalizeParticipants, resolveLaneMatchup } from '../lib/lane.mjs';
 import { buildEntityCatalog } from '../lib/entities.mjs';
 import { openPlayer, stratzPlayer } from './fixtures.mjs';
 
@@ -96,4 +96,9 @@ test('marks a participant position timeline available only with a valid STRATZ p
   assert.equal(participants[0].positionTimelineAvailable, true);
   assert.equal(participants[1].playbackAvailable, true);
   assert.equal(participants[1].positionTimelineAvailable, false);
+});
+
+test('maps only integer OpenDota player slots to participant indexes', () => {
+  assert.deepEqual([0, 4, 128, 132].map(indexForOpenSlot), [0, 4, 5, 9]);
+  assert.deepEqual([-1, 5, 127, 133, 2.5, '130', null].map(indexForOpenSlot), [null, null, null, null, null, null, null]);
 });

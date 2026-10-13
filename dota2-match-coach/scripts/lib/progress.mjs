@@ -214,14 +214,17 @@ export async function loadProgressHistory(directory) {
       if (visited > MAX_ENTRIES) { result.truncated = true; break; }
       if (!entry.name.toLowerCase().endsWith('.json')) continue;
       if (!entry.isFile()) { result.skippedFileCount += 1; continue; }
-      if (entries.length === MAX_FILES) { result.truncated = true; break; }
       entries.push(entry.name);
     }
   } catch {
     return { ...result, status: 'unavailable', reason: 'history_directory_unavailable' };
   }
+  // Artifacts are named after their match ID, which grows over time. Past the file
+  // limit the latest matches are kept: older ones are the first to leave the patch.
+  entries.sort((left, right) => right.localeCompare(left, 'en', { numeric: true }));
+  if (entries.length > MAX_FILES) result.truncated = true;
   let totalBytes = 0;
-  for (const filename of entries.sort()) {
+  for (const filename of entries.slice(0, MAX_FILES)) {
     let handle;
     try {
       handle = await open(path.join(directory, filename), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);

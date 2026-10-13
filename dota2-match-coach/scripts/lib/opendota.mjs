@@ -1,8 +1,7 @@
 import { SourceError, requestJson } from './http.mjs';
 
 const DEFAULT_BASE_URL = 'https://api.opendota.com/api';
-const TERMINAL_STATES = new Set(['completed', 'failed', 'error']);
-const HERO_ERROR_CODE = Symbol('heroErrorCode');
+const MAX_REQUEST_ATTEMPTS = 3;
 // OpenDota's free tier allows 60 requests a minute; polling every second exhausts it within a single parse.
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
 const ENTITY_CONSTANT_PATHS = [
@@ -26,19 +25,15 @@ function makeResult(status, match, parse, error) {
   return error === undefined ? { status, match, parse } : { status, match, parse, error };
 }
 
+function isTimeout(error) {
+  return error?.code === 'parse_timeout' || error?.code === 'timeout';
+}
+
 function retryDelayMs(value, now) {
   if (typeof value !== 'string') return null;
   if (/^\d+$/.test(value)) return Number(value) * 1_000;
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) ? Math.max(0, timestamp - now) : null;
-}
-
-function validHeroConstants(heroes) {
-  if (!heroes || typeof heroes !== 'object' || Array.isArray(heroes)) return false;
-  return Object.values(heroes).some((hero) =>
-    hero && typeof hero === 'object'
-    && Number.isSafeInteger(hero.id) && hero.id > 0
-    && [hero.name, hero.localized_name, hero.localizedName].some((name) => typeof name === 'string' && name.trim()));
 }
 
 export function createOpenDotaClient({
@@ -49,67 +44,51 @@ export function createOpenDotaClient({
 } = {}) {
   const request = (path, options = {}) => requestJson(`${baseUrl}${path}`, { fetchImpl, ...options });
 
+  // A rate-limited request is retried only when OpenDota names a wait that still
+  // fits before the deadline.
   async function requestWithinDeadline(path, options, deadline) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 1; ; attempt += 1) {
       const remaining = deadline - now();
       if (remaining <= 0) throw new SourceError('parse_timeout', 'Parse request timed out');
       try {
-        return await request(path, { ...options, timeoutMs: Math.min(options?.timeoutMs ?? remaining, remaining) });
+        return await request(path, { ...options, timeoutMs: remaining });
       } catch (error) {
-        if (!(error instanceof SourceError) || error.code !== 'rate_limited') throw error;
+        if (!(error instanceof SourceError) || error.code !== 'rate_limited' || attempt === MAX_REQUEST_ATTEMPTS) throw error;
         const delay = retryDelayMs(error.details.retryAfter, now());
-        const retryRemaining = deadline - now();
-        if (delay == null || delay <= 0 || delay >= retryRemaining || attempt === 2) throw error;
+        if (delay == null || delay <= 0 || delay >= deadline - now()) throw error;
         await sleep(delay);
       }
     }
-    throw new SourceError('rate_limited', 'OpenDota retry limit reached');
   }
 
   const degraded = (match, parse, error) => makeResult('ready', match, parse, error);
 
   async function loadEntityConstants() {
-    let heroErrorCode;
     const settled = await Promise.allSettled(
-      ENTITY_CONSTANT_PATHS.map(async ([name, requestPath]) => {
-        try {
-          return [name, (await request(requestPath)).data];
-        } catch (error) {
-          if (name === 'heroes') heroErrorCode = error instanceof SourceError ? error.code : 'unknown';
-          throw error;
-        }
-      }),
+      ENTITY_CONSTANT_PATHS.map(async ([, requestPath]) => (await request(requestPath)).data),
     );
     const result = {};
     const missing = [];
     for (let index = 0; index < ENTITY_CONSTANT_PATHS.length; index += 1) {
       const name = ENTITY_CONSTANT_PATHS[index][0];
       const entry = settled[index];
-      if (entry.status === 'fulfilled' && entry.value[1] && typeof entry.value[1] === 'object') {
-        result[name] = entry.value[1];
+      if (entry.status === 'fulfilled' && entry.value && typeof entry.value === 'object') {
+        result[name] = entry.value;
       } else {
         result[name] = {};
         missing.push(name);
       }
     }
     const loaded = ENTITY_CONSTANT_PATHS.length - missing.length;
-    const constants = {
+    return {
       status: loaded === ENTITY_CONSTANT_PATHS.length ? 'ready' : loaded > 0 ? 'partial' : 'failed',
       missing,
       ...result,
     };
-    Object.defineProperty(constants, HERO_ERROR_CODE, { value: heroErrorCode });
-    return constants;
   }
 
   return {
     loadEntityConstants,
-
-    async loadHeroConstants() {
-      const constants = await loadEntityConstants();
-      if (validHeroConstants(constants.heroes)) return { status: 'ready', heroes: constants.heroes };
-      return { status: 'failed', error: { code: constants[HERO_ERROR_CODE] ?? 'invalid_response' } };
-    },
 
     async loadMatch(matchId, { parseTimeoutMs = 30_000, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS } = {}) {
       const notRequested = { requested: false, state: 'not_requested', jobId: undefined };
@@ -130,8 +109,7 @@ export function createOpenDotaClient({
       try {
         parseResponse = (await requestWithinDeadline(`/request/${matchId}`, { method: 'POST' }, deadline)).data;
       } catch (error) {
-        const state = error?.code === 'parse_timeout' || error?.code === 'timeout' ? 'timeout' : 'unavailable';
-        return degraded(match, { requested: true, state, jobId: undefined }, error);
+        return degraded(match, { requested: true, state: isTimeout(error) ? 'timeout' : 'unavailable', jobId: undefined }, error);
       }
 
       const jobId = getJobId(parseResponse);
@@ -139,39 +117,33 @@ export function createOpenDotaClient({
       if (jobId === undefined || jobId === null || jobId === '') {
         return degraded(match, { ...requested, state: 'unavailable' }, new SourceError('parse_unavailable', 'Parse job ID unavailable'));
       }
+      const failedRequest = (error) => degraded(match, { ...requested, state: isTimeout(error) ? 'timeout' : 'requested' }, error);
 
-      let state = 'requested';
-      while (!TERMINAL_STATES.has(state)) {
-        const remainingBeforeSleep = deadline - now();
-        if (remainingBeforeSleep <= 0) {
+      // While the parse waits or runs, the job endpoint returns the job's queue row;
+      // once the job leaves the queue it returns null, whether the parse succeeded or
+      // failed. Only the reloaded match tells the two apart.
+      let job;
+      do {
+        const remaining = deadline - now();
+        if (remaining <= 0) {
           return degraded(match, { ...requested, state: 'timeout' }, new SourceError('parse_timeout', 'Parse request timed out'));
         }
-        await sleep(Math.min(pollIntervalMs, remainingBeforeSleep));
-        const remainingBeforePoll = deadline - now();
-        if (remainingBeforePoll <= 0) {
-          return degraded(match, { ...requested, state: 'timeout' }, new SourceError('parse_timeout', 'Parse request timed out'));
-        }
+        await sleep(Math.min(pollIntervalMs, remaining));
         try {
-          const job = (await requestWithinDeadline(`/request/${jobId}`, { timeoutMs: remainingBeforePoll }, deadline)).data;
-          state = job?.state ?? job?.status ?? 'pending';
+          job = (await requestWithinDeadline(`/request/${jobId}`, {}, deadline)).data;
         } catch (error) {
-          const failedState = error?.code === 'parse_timeout' || error?.code === 'timeout' ? 'timeout' : state;
-          return degraded(match, { ...requested, state: failedState }, error);
+          return failedRequest(error);
         }
-      }
-
-      if (state !== 'completed') {
-        return degraded(match, { ...requested, state }, new SourceError('parse_failed', 'Parse request failed'));
-      }
+      } while (job != null);
 
       try {
         const parsedMatch = (await requestWithinDeadline(`/matches/${matchId}`, {}, deadline)).data;
         if (!hasReplayData(parsedMatch)) {
-          return degraded(match, { ...requested, state: 'incomplete' }, new SourceError('parse_incomplete', 'Parsed match data unavailable'));
+          return degraded(match, { ...requested, state: 'failed' }, new SourceError('parse_failed', 'Parse request failed'));
         }
-        return makeResult('ready', parsedMatch, { ...requested, state });
+        return makeResult('ready', parsedMatch, { ...requested, state: 'completed' });
       } catch (error) {
-        return degraded(match, { ...requested, state }, error);
+        return failedRequest(error);
       }
     },
   };

@@ -298,6 +298,16 @@ test('POSIX wrapper returns exit 2 for an invalid numeric ID without network acc
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, /STRATZ_API_KEY|Bearer|Authorization/i);
 });
 
+test('POSIX wrapper explains a missing player selector instead of exiting silently', async (context) => {
+  if (process.platform === 'win32') return context.skip('The POSIX wrapper is executed on macOS and Linux hosts only.');
+
+  for (const args of [['8963363814'], ['8963363814', '']]) {
+    const result = await processResult('/bin/sh', [path.join(scriptsDirectory, 'analyze-match.sh'), ...args]);
+    assert.equal(result.code, 2);
+    assert.match(result.stderr, /^error: invalid_arguments$/m);
+  }
+});
+
 test('POSIX wrapper remains portable and quotes positional arguments', async () => {
   const wrapper = await readFile(path.join(scriptsDirectory, 'analyze-match.sh'), 'utf8');
 

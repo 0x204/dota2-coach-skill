@@ -16,6 +16,7 @@ export function sideForOpenSlot(slot) {
 }
 
 export function indexForOpenSlot(slot) {
+  if (!Number.isInteger(slot)) return null;
   if (slot >= 0 && slot <= 4) return slot;
   if (slot >= 128 && slot <= 132) return slot - 123;
   return null;

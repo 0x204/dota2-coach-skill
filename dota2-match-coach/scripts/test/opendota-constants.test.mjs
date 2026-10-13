@@ -55,25 +55,3 @@ test('returns failed constants with stable empty groups when all requests fail',
   assert.deepEqual(result.abilities, {});
   assert.equal(Object.hasOwn(result, 'rawResponses'), false);
 });
-
-test('preserves the safe heroes request error code in loadHeroConstants', async () => {
-  const client = createOpenDotaClient({
-    baseUrl: 'https://test.invalid/api',
-    fetchImpl: async (url) => new URL(url).pathname.endsWith('/heroes')
-      ? response({ error: 'forbidden' }, 403)
-      : response({}),
-  });
-  const result = await client.loadHeroConstants();
-  assert.deepEqual(result, { status: 'failed', error: { code: 'auth' } });
-});
-
-test('keeps invalid_response for malformed heroes constants', async () => {
-  const client = createOpenDotaClient({
-    baseUrl: 'https://test.invalid/api',
-    fetchImpl: async (url) => new URL(url).pathname.endsWith('/heroes')
-      ? response({ malformed: true })
-      : response({}),
-  });
-  const result = await client.loadHeroConstants();
-  assert.deepEqual(result, { status: 'failed', error: { code: 'invalid_response' } });
-});

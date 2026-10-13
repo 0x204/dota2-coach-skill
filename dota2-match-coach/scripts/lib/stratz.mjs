@@ -71,7 +71,7 @@ export function createStratzClient({ apiKey, fetchImpl = fetch, endpoint = DEFAU
         const match = payload.data.match;
         if (match === null) return { status: 'not_found' };
         if (!isMatch(match)) throw new SourceError('invalid_response', 'Malformed GraphQL response');
-        return match ? { status: 'ready', match } : { status: 'not_found' };
+        return { status: 'ready', match };
       } catch (error) {
         const code = error instanceof SourceError ? error.code : 'unknown';
         return { status: 'failed', error: { code } };

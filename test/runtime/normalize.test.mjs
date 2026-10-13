@@ -267,6 +267,15 @@ test('counts only STRATZ events in each half-open phase interval', () => {
   ]);
 });
 
+test('counts an event at the final second of the match in the final phase', () => {
+  const phases = buildPhases(openDotaPlayer(), {
+    playbackData: { killEvents: [{ time: 959 }, { time: 960 }], deathEvents: [{ time: 960 }], assistEvents: [] },
+  }, 960);
+
+  const { kills, deaths, assists } = phases.at(-1).metrics;
+  assert.deepEqual({ kills, deaths, assists }, { kills: 2, deaths: 1, assists: 0 });
+});
+
 test('recognizes timed OpenDota teamfights when STRATZ fight events are absent', () => {
   const model = normalize({
     match: { teamfights: [{ start: 65, end: 101 }] },

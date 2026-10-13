@@ -960,6 +960,7 @@ export function renderEvidenceMarkdown(model = {}) {
   const player = model.player ?? {};
   const quality = model.dataQuality ?? {};
   const phases = phaseRows(model.phases);
+  const baseline = baselineRows(model.baseline);
   const laneOpponents = Array.isArray(model.lane?.opponents) ? model.lane.opponents : [];
   const contexts = Array.isArray(model.deathAnalysis?.contexts) ? model.deathAnalysis.contexts : [];
   const patterns = Array.isArray(model.deathAnalysis?.patterns) ? model.deathAnalysis.patterns : [];
@@ -1015,7 +1016,7 @@ export function renderEvidenceMarkdown(model = {}) {
     '',
     '| Metric | Minute | Player | Baseline (mean) | Delta | Ratio | Matches in sample | Caveat |',
     '| --- | --- | --- | --- | --- | --- | --- | --- |',
-    ...(baselineRows(model.baseline).length > 0 ? baselineRows(model.baseline) : ['| — | — | — | — | — | — | — | — |']),
+    ...(baseline.length > 0 ? baseline : ['| — | — | — | — | — | — | — | — |']),
     '',
     ...teamEconomyMarkdown(model.teamEconomy),
     ...objectivesMarkdown(model.objectives),
@@ -1069,7 +1070,9 @@ async function atomicWrite(finalPath, contents) {
 export async function writeArtifacts(model, outputDir) {
   await mkdir(outputDir, { recursive: true });
   const evidence = projectArtifact(model);
-  const base = path.join(outputDir, String(evidence.request.matchId));
+  // A match can be reviewed for several of its players, and personal history keeps
+  // each player's snapshot of it, so the files are named by both.
+  const base = path.join(outputDir, `${evidence.request.matchId}-${evidence.request.accountId}`);
   const jsonPath = `${base}.json`;
   const markdownPath = `${base}.md`;
   await atomicWrite(jsonPath, `${JSON.stringify(evidence, null, 2)}\n`);

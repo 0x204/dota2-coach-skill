@@ -23,7 +23,7 @@ export class AnalysisError extends Error {
   }
 }
 
-function positiveInteger(value, name) {
+function positiveInteger(value) {
   if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
     throw new AnalysisError('invalid_arguments');
   }
@@ -52,7 +52,7 @@ export function parseArgs(argv) {
     const value = argv[index + 1];
     if (typeof value !== 'string' || value.startsWith('--')) throw new AnalysisError('invalid_arguments');
     if (name === 'matchId' || name === 'accountId' || name === 'parseTimeoutMs') {
-      values[name] = positiveInteger(value, name);
+      values[name] = positiveInteger(value);
     } else if (name === 'heroName') {
       if (value.trim().length === 0) throw new AnalysisError('invalid_arguments');
       values[name] = value.trim();
@@ -175,7 +175,7 @@ export async function runAnalysis(options, { openDotaClient, stratzClient, valve
       stratz,
       valve,
       entityConstants,
-      generatedAt: new Date().toISOString(),
+      generatedAt: new Date(now()).toISOString(),
     });
   } catch (error) {
     if (error instanceof NormalizationError) throw new AnalysisError(error.code);
@@ -226,21 +226,15 @@ function defaultDependencies() {
   };
 }
 
-function exitCodeFor(error) {
-  if (['invalid_arguments', 'account_not_found', 'account_ambiguous', 'hero_not_found', 'hero_ambiguous', 'hero_account_unavailable', 'hero_lookup_unavailable', 'selector_conflict'].includes(error?.code)) return 2;
-  if (error?.code === 'match_not_found') return 3;
-  return 4;
-}
-
-const SAFE_DIAGNOSTICS = new Set([
-  'invalid_arguments', 'account_not_found', 'account_ambiguous', 'match_not_found',
-  'hero_not_found', 'hero_ambiguous', 'hero_account_unavailable', 'hero_lookup_unavailable', 'selector_conflict',
-  'no_usable_source_data', 'patch_unverified', 'unsupported_patch',
+// The only diagnostics printed, with their exit codes: 2 for a request the user can
+// correct, 3 for an unknown match and 4 for everything else. Any other error is
+// reported as `runtime_error`, so no source message reaches the output.
+const EXIT_CODES = new Map([
+  ['invalid_arguments', 2], ['account_not_found', 2], ['account_ambiguous', 2],
+  ['hero_not_found', 2], ['hero_ambiguous', 2], ['hero_account_unavailable', 2], ['hero_lookup_unavailable', 2], ['selector_conflict', 2],
+  ['match_not_found', 3],
+  ['no_usable_source_data', 4], ['patch_unverified', 4], ['unsupported_patch', 4], ['runtime_error', 4],
 ]);
-
-function safeDiagnostic(error) {
-  return SAFE_DIAGNOSTICS.has(error?.code) ? error.code : 'runtime_error';
-}
 
 export async function runCli(argv, { dependencies = defaultDependencies(), stdout = (line) => console.log(line), stderr = (line) => console.error(line) } = {}) {
   try {
@@ -256,8 +250,9 @@ export async function runCli(argv, { dependencies = defaultDependencies(), stdou
     stdout(`markdown: ${artifacts.markdownPath}`);
     return 0;
   } catch (error) {
-    stderr(`error: ${safeDiagnostic(error)}`);
-    return exitCodeFor(error);
+    const code = EXIT_CODES.has(error?.code) ? error.code : 'runtime_error';
+    stderr(`error: ${code}`);
+    return EXIT_CODES.get(code);
   }
 }
 
