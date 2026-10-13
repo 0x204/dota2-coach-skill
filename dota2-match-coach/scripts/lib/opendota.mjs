@@ -1,7 +1,7 @@
 import { SourceError, requestJson } from './http.mjs';
 
 const DEFAULT_BASE_URL = 'https://api.opendota.com/api';
-const HERO_ERROR_CODE = Symbol('heroErrorCode');
+const MAX_REQUEST_ATTEMPTS = 3;
 // OpenDota's free tier allows 60 requests a minute; polling every second exhausts it within a single parse.
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
 const ENTITY_CONSTANT_PATHS = [
@@ -36,14 +36,6 @@ function retryDelayMs(value, now) {
   return Number.isFinite(timestamp) ? Math.max(0, timestamp - now) : null;
 }
 
-function validHeroConstants(heroes) {
-  if (!heroes || typeof heroes !== 'object' || Array.isArray(heroes)) return false;
-  return Object.values(heroes).some((hero) =>
-    hero && typeof hero === 'object'
-    && Number.isSafeInteger(hero.id) && hero.id > 0
-    && [hero.name, hero.localized_name, hero.localizedName].some((name) => typeof name === 'string' && name.trim()));
-}
-
 export function createOpenDotaClient({
   fetchImpl = fetch,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -52,67 +44,51 @@ export function createOpenDotaClient({
 } = {}) {
   const request = (path, options = {}) => requestJson(`${baseUrl}${path}`, { fetchImpl, ...options });
 
+  // A rate-limited request is retried only when OpenDota names a wait that still
+  // fits before the deadline.
   async function requestWithinDeadline(path, options, deadline) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 1; ; attempt += 1) {
       const remaining = deadline - now();
       if (remaining <= 0) throw new SourceError('parse_timeout', 'Parse request timed out');
       try {
-        return await request(path, { ...options, timeoutMs: Math.min(options?.timeoutMs ?? remaining, remaining) });
+        return await request(path, { ...options, timeoutMs: remaining });
       } catch (error) {
-        if (!(error instanceof SourceError) || error.code !== 'rate_limited') throw error;
+        if (!(error instanceof SourceError) || error.code !== 'rate_limited' || attempt === MAX_REQUEST_ATTEMPTS) throw error;
         const delay = retryDelayMs(error.details.retryAfter, now());
-        const retryRemaining = deadline - now();
-        if (delay == null || delay <= 0 || delay >= retryRemaining || attempt === 2) throw error;
+        if (delay == null || delay <= 0 || delay >= deadline - now()) throw error;
         await sleep(delay);
       }
     }
-    throw new SourceError('rate_limited', 'OpenDota retry limit reached');
   }
 
   const degraded = (match, parse, error) => makeResult('ready', match, parse, error);
 
   async function loadEntityConstants() {
-    let heroErrorCode;
     const settled = await Promise.allSettled(
-      ENTITY_CONSTANT_PATHS.map(async ([name, requestPath]) => {
-        try {
-          return [name, (await request(requestPath)).data];
-        } catch (error) {
-          if (name === 'heroes') heroErrorCode = error instanceof SourceError ? error.code : 'unknown';
-          throw error;
-        }
-      }),
+      ENTITY_CONSTANT_PATHS.map(async ([, requestPath]) => (await request(requestPath)).data),
     );
     const result = {};
     const missing = [];
     for (let index = 0; index < ENTITY_CONSTANT_PATHS.length; index += 1) {
       const name = ENTITY_CONSTANT_PATHS[index][0];
       const entry = settled[index];
-      if (entry.status === 'fulfilled' && entry.value[1] && typeof entry.value[1] === 'object') {
-        result[name] = entry.value[1];
+      if (entry.status === 'fulfilled' && entry.value && typeof entry.value === 'object') {
+        result[name] = entry.value;
       } else {
         result[name] = {};
         missing.push(name);
       }
     }
     const loaded = ENTITY_CONSTANT_PATHS.length - missing.length;
-    const constants = {
+    return {
       status: loaded === ENTITY_CONSTANT_PATHS.length ? 'ready' : loaded > 0 ? 'partial' : 'failed',
       missing,
       ...result,
     };
-    Object.defineProperty(constants, HERO_ERROR_CODE, { value: heroErrorCode });
-    return constants;
   }
 
   return {
     loadEntityConstants,
-
-    async loadHeroConstants() {
-      const constants = await loadEntityConstants();
-      if (validHeroConstants(constants.heroes)) return { status: 'ready', heroes: constants.heroes };
-      return { status: 'failed', error: { code: constants[HERO_ERROR_CODE] ?? 'invalid_response' } };
-    },
 
     async loadMatch(matchId, { parseTimeoutMs = 30_000, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS } = {}) {
       const notRequested = { requested: false, state: 'not_requested', jobId: undefined };
