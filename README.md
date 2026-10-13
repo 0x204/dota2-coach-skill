@@ -118,7 +118,7 @@ From the repository root:
 node --test test/runtime/*.test.mjs dota2-match-coach/scripts/test/*.test.mjs
 ```
 
-The combined suite contains the repository regressions and the v2 skill tests. It needs no network access unless the opt-in live-smoke environment variables are present. Platform-specific and inactive live tests skip safely.
+The combined suite contains the repository regressions and the v2 skill tests. It needs no network access unless the opt-in live-smoke environment variables are present. Platform-specific and inactive live tests skip safely. GitHub Actions runs the suite on Linux, macOS and Windows, where the PowerShell wrapper tests also run.
 
 The final coaching answer is also evaluated through [offline consuming-agent scenarios](test/coaching/README.md), including missing replay data, zero deaths, mismatched ranks, and focused questions. These evaluations are separate from the Node test suite.
 
