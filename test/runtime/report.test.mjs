@@ -270,9 +270,23 @@ test('writeArtifacts rejects nested objects in sourced values and every admitted
 
 test('writeArtifacts cleans a same-directory temporary file when final rename fails', async (t) => {
   const directory = await temporaryDirectory(t);
-  await mkdir(path.join(directory, '42.md'));
+  await mkdir(path.join(directory, '42-56386500.md'));
 
   await assert.rejects(() => writeArtifacts(evidenceModel(), directory));
   assert.equal((await readdir(directory)).some((name) => name.includes('.tmp-')), false);
-  assert.equal((await stat(path.join(directory, '42.md'))).isDirectory(), true);
+  assert.equal((await stat(path.join(directory, '42-56386500.md'))).isDirectory(), true);
+});
+
+test('writeArtifacts keeps the reviews of two players in one match apart', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const other = evidenceModel();
+  other.request.accountId = 99;
+  other.player.accountId.value = 99;
+
+  const selected = await writeArtifacts(evidenceModel(), directory);
+  const second = await writeArtifacts(other, directory);
+
+  assert.deepEqual((await readdir(directory)).sort(), ['42-56386500.json', '42-56386500.md', '42-99.json', '42-99.md']);
+  assert.equal(JSON.parse(await readFile(selected.jsonPath, 'utf8')).request.accountId, 56386500);
+  assert.equal(JSON.parse(await readFile(second.jsonPath, 'utf8')).request.accountId, 99);
 });

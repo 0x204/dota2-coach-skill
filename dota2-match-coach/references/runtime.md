@@ -69,7 +69,7 @@ Without `STRATZ_API_KEY`, an account-based current-patch smoke is still useful a
 
 ## Read the v2 artifact
 
-The successful JSON has `schemaVersion: "2.3.0"`. Inspect these sections before writing a review:
+A successful run prints the paths it wrote: `<match_id>-<account_id>.json` and `.md` in the output directory, so each player reviewed in a match keeps their own pair. The successful JSON has `schemaVersion: "2.3.0"`. Inspect these sections before writing a review:
 
 - `sources`, `warnings`, and `dataQuality.capabilities`: what source evidence exists and which classes of conclusion are supported;
 - `participants`: ten deterministic match slots with `{ id, name }` hero references, side, position, lane, role, rank, and playback availability; unknown values remain `null`;

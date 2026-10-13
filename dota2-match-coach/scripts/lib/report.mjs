@@ -1069,7 +1069,9 @@ async function atomicWrite(finalPath, contents) {
 export async function writeArtifacts(model, outputDir) {
   await mkdir(outputDir, { recursive: true });
   const evidence = projectArtifact(model);
-  const base = path.join(outputDir, String(evidence.request.matchId));
+  // A match can be reviewed for several of its players, and personal history keeps
+  // each player's snapshot of it, so the files are named by both.
+  const base = path.join(outputDir, `${evidence.request.matchId}-${evidence.request.accountId}`);
   const jsonPath = `${base}.json`;
   const markdownPath = `${base}.md`;
   await atomicWrite(jsonPath, `${JSON.stringify(evidence, null, 2)}\n`);
