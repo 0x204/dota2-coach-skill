@@ -203,9 +203,12 @@ function seriesDelta(series, start, end) {
   return endSample.value - startSample.value;
 }
 
-function countEvents(events, start, end) {
+// Phases are half-open, except that the last one also holds the final second of
+// the match: an event there belongs to no later phase.
+function countEvents(events, start, end, closed) {
   if (!Array.isArray(events)) return null;
-  return events.filter((event) => finiteNumber(event?.time) && event.time >= start && event.time < end).length;
+  return events.filter((event) => finiteNumber(event?.time) && event.time >= start
+    && (event.time < end || (closed && event.time === end))).length;
 }
 
 function intervalLabel(start, end) {
@@ -248,7 +251,7 @@ export function buildPhases(player = {}, stratzPlayer, durationSeconds) {
         metrics[metric] = delta;
         metrics[rateMetric] = delta == null ? null : delta / minutes;
       }
-      for (const [metric, eventKey] of EVENT_METRICS) metrics[metric] = countEvents(playback[eventKey], start, end);
+      for (const [metric, eventKey] of EVENT_METRICS) metrics[metric] = countEvents(playback[eventKey], start, end, end === duration);
       return { id, start, end, interval: intervalLabel(start, end), metrics, extremaWithinMatch: [] };
     });
   return addExtrema(phases);
