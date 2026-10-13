@@ -76,6 +76,31 @@ test('marks unavailable evidence while keeping an explicit null context shape', 
   ]);
 });
 
+test('keeps an allied death without a recorded time out of the nearby deaths', () => {
+  const ally = stratzPlayer({ accountId: 11, heroId: 2, radiant: true, playbackData: playback({
+    deaths: [{ time: 99, positionX: 41, positionY: 40 }, { positionX: 40, positionY: 41 }],
+    positions: [{ time: 98, x: 41, y: 40 }],
+  }) });
+  const result = buildDeathContexts({
+    selectedAccountId: 10,
+    participants: [
+      { slot: 0, accountId: 10, hero: { id: 90, name: 'Keeper of the Light' }, side: 'radiant' },
+      { slot: 1, accountId: 11, hero: { id: 2, name: 'Axe' }, side: 'radiant' },
+    ],
+    stratzPlayers: [
+      stratzPlayer({ accountId: 10, heroId: 90, radiant: true, playbackData: playback({ deaths: [{ time: 100 }], positions: [{ time: 98, x: 40, y: 40 }] }) }),
+      ally,
+    ],
+    teamfights: [],
+    selectedRepositions: [],
+    durationSeconds: 1800,
+    catalog: { hero: {}, item: {}, ability: {} },
+  });
+
+  assert.deepEqual(result.contexts[0].nearbyDeaths.map((row) => row.time), [99]);
+  assert.ok(result.contexts[0].unavailable.includes('allied_deaths_unavailable:11'));
+});
+
 test('uses a supplied valid teamfight timeline to distinguish inside and outside deaths', () => {
   const result = buildDeathContexts({
     selectedAccountId: 10,

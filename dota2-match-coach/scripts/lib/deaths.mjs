@@ -267,7 +267,7 @@ function localEvents({
       continue;
     }
     for (const event of Array.isArray(deathEvents) ? deathEvents : []) {
-      if (Math.abs(event.time - time) > LOCAL_TRADE_WINDOW) continue;
+      if (!finite(event?.time) || Math.abs(event.time - time) > LOCAL_TRADE_WINDOW) continue;
       const eventPosition = positionForEvent(event, player.playbackData);
       if (!eventPosition || !position) {
         if (isEnemy) tradeComplete = false;
