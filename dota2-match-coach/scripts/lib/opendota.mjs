@@ -1,7 +1,6 @@
 import { SourceError, requestJson } from './http.mjs';
 
 const DEFAULT_BASE_URL = 'https://api.opendota.com/api';
-const TERMINAL_STATES = new Set(['completed', 'failed', 'error']);
 const HERO_ERROR_CODE = Symbol('heroErrorCode');
 // OpenDota's free tier allows 60 requests a minute; polling every second exhausts it within a single parse.
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
@@ -24,6 +23,10 @@ function getJobId(response) {
 
 function makeResult(status, match, parse, error) {
   return error === undefined ? { status, match, parse } : { status, match, parse, error };
+}
+
+function isTimeout(error) {
+  return error?.code === 'parse_timeout' || error?.code === 'timeout';
 }
 
 function retryDelayMs(value, now) {
@@ -130,8 +133,7 @@ export function createOpenDotaClient({
       try {
         parseResponse = (await requestWithinDeadline(`/request/${matchId}`, { method: 'POST' }, deadline)).data;
       } catch (error) {
-        const state = error?.code === 'parse_timeout' || error?.code === 'timeout' ? 'timeout' : 'unavailable';
-        return degraded(match, { requested: true, state, jobId: undefined }, error);
+        return degraded(match, { requested: true, state: isTimeout(error) ? 'timeout' : 'unavailable', jobId: undefined }, error);
       }
 
       const jobId = getJobId(parseResponse);
@@ -139,39 +141,33 @@ export function createOpenDotaClient({
       if (jobId === undefined || jobId === null || jobId === '') {
         return degraded(match, { ...requested, state: 'unavailable' }, new SourceError('parse_unavailable', 'Parse job ID unavailable'));
       }
+      const failedRequest = (error) => degraded(match, { ...requested, state: isTimeout(error) ? 'timeout' : 'requested' }, error);
 
-      let state = 'requested';
-      while (!TERMINAL_STATES.has(state)) {
-        const remainingBeforeSleep = deadline - now();
-        if (remainingBeforeSleep <= 0) {
+      // While the parse waits or runs, the job endpoint returns the job's queue row;
+      // once the job leaves the queue it returns null, whether the parse succeeded or
+      // failed. Only the reloaded match tells the two apart.
+      let job;
+      do {
+        const remaining = deadline - now();
+        if (remaining <= 0) {
           return degraded(match, { ...requested, state: 'timeout' }, new SourceError('parse_timeout', 'Parse request timed out'));
         }
-        await sleep(Math.min(pollIntervalMs, remainingBeforeSleep));
-        const remainingBeforePoll = deadline - now();
-        if (remainingBeforePoll <= 0) {
-          return degraded(match, { ...requested, state: 'timeout' }, new SourceError('parse_timeout', 'Parse request timed out'));
-        }
+        await sleep(Math.min(pollIntervalMs, remaining));
         try {
-          const job = (await requestWithinDeadline(`/request/${jobId}`, { timeoutMs: remainingBeforePoll }, deadline)).data;
-          state = job?.state ?? job?.status ?? 'pending';
+          job = (await requestWithinDeadline(`/request/${jobId}`, {}, deadline)).data;
         } catch (error) {
-          const failedState = error?.code === 'parse_timeout' || error?.code === 'timeout' ? 'timeout' : state;
-          return degraded(match, { ...requested, state: failedState }, error);
+          return failedRequest(error);
         }
-      }
-
-      if (state !== 'completed') {
-        return degraded(match, { ...requested, state }, new SourceError('parse_failed', 'Parse request failed'));
-      }
+      } while (job != null);
 
       try {
         const parsedMatch = (await requestWithinDeadline(`/matches/${matchId}`, {}, deadline)).data;
         if (!hasReplayData(parsedMatch)) {
-          return degraded(match, { ...requested, state: 'incomplete' }, new SourceError('parse_incomplete', 'Parsed match data unavailable'));
+          return degraded(match, { ...requested, state: 'failed' }, new SourceError('parse_failed', 'Parse request failed'));
         }
-        return makeResult('ready', parsedMatch, { ...requested, state });
+        return makeResult('ready', parsedMatch, { ...requested, state: 'completed' });
       } catch (error) {
-        return degraded(match, { ...requested, state }, error);
+        return failedRequest(error);
       }
     },
   };
