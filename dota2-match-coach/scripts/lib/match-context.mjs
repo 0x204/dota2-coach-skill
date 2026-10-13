@@ -28,9 +28,8 @@ function oppositeSide(side) {
 }
 
 function participantBySlot(participants, playerSlot) {
-  if (!Number.isInteger(playerSlot)) return null;
   const index = indexForOpenSlot(playerSlot);
-  return Number.isInteger(index) ? participants[index] ?? null : null;
+  return index == null ? null : participants[index] ?? null;
 }
 
 function participantRef(participant, selectedAccountId) {

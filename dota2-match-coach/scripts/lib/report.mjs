@@ -960,6 +960,7 @@ export function renderEvidenceMarkdown(model = {}) {
   const player = model.player ?? {};
   const quality = model.dataQuality ?? {};
   const phases = phaseRows(model.phases);
+  const baseline = baselineRows(model.baseline);
   const laneOpponents = Array.isArray(model.lane?.opponents) ? model.lane.opponents : [];
   const contexts = Array.isArray(model.deathAnalysis?.contexts) ? model.deathAnalysis.contexts : [];
   const patterns = Array.isArray(model.deathAnalysis?.patterns) ? model.deathAnalysis.patterns : [];
@@ -1015,7 +1016,7 @@ export function renderEvidenceMarkdown(model = {}) {
     '',
     '| Metric | Minute | Player | Baseline (mean) | Delta | Ratio | Matches in sample | Caveat |',
     '| --- | --- | --- | --- | --- | --- | --- | --- |',
-    ...(baselineRows(model.baseline).length > 0 ? baselineRows(model.baseline) : ['| — | — | — | — | — | — | — | — |']),
+    ...(baseline.length > 0 ? baseline : ['| — | — | — | — | — | — | — | — |']),
     '',
     ...teamEconomyMarkdown(model.teamEconomy),
     ...objectivesMarkdown(model.objectives),
