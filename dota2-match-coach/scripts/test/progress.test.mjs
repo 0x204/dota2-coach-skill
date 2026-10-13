@@ -302,11 +302,13 @@ test('loader preserves provenance conflicts without passing through arbitrary ca
   assert.equal(progress.eligibleMatchCount, 1);
 });
 
-test('history loader truncates excessive file counts', async (t) => {
+test('history loader truncates excessive file counts to the latest matches', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'coach-progress-limit-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  await Promise.all(Array.from({ length: 105 }, (_, index) => writeFile(path.join(directory, `${index}.json`), JSON.stringify(model(index + 1, index + 1)))));
+  await Promise.all(Array.from({ length: 105 }, (_, index) => writeFile(path.join(directory, `${index + 1}-56386500.json`), JSON.stringify(model(index + 1, index + 1)))));
   const result = await loadProgressHistory(directory);
   assert.equal(result.artifacts.length, 100);
   assert.equal(result.truncated, true);
+  const matchIds = result.artifacts.map((artifact) => artifact.request.matchId).sort((left, right) => left - right);
+  assert.deepEqual(matchIds, Array.from({ length: 100 }, (_, index) => index + 6));
 });
